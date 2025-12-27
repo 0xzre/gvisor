@@ -47,7 +47,65 @@ readonly module origpwd othersrc
 
 # Build a full gopath.
 declare -r go_output="${tmp_dir}/output"
+set +e
 make build BAZEL_OPTIONS="" TARGETS="//:gopath"
+rc=$?
+set -e
+if [[ ${rc} -ne 0 ]]; then
+  # Best-effort diagnostics to understand failures like:
+  #   fork/exec .../external/rules_go++go_sdk+main___download_0/bin/go: ENOENT
+  #
+  # Keep this local to failures so it doesn't add noise to successful runs.
+  set +e
+  echo "~~~ go_branch: diagnostics on failure" >&2
+
+  # If bazel is available in this environment, try to inspect its output base.
+  if command -v bazel >/dev/null 2>&1; then
+    echo "--- bazel info (host)" >&2
+    bazel version >&2
+    ob="$(bazel info output_base 2>/dev/null)"
+    if [[ -n "${ob}" ]]; then
+      echo "output_base=${ob}" >&2
+      ls -lah "${ob}/external/rules_go++go_sdk+main___download_0/bin/go" >&2
+      ls -lah "${ob}/external/rules_go++go_sdk+main___download_0/go/bin/go" >&2
+      file "${ob}/external/rules_go++go_sdk+main___download_0/bin/go" >&2
+    fi
+  fi
+
+  # If Bazel is run in the gvisor-bazel docker container (the default for our
+  # Makefile wrappers), inspect the Go SDK in that output base.
+  if command -v docker >/dev/null 2>&1; then
+    arch="$(uname -m 2>/dev/null)"
+    # Mirror tools/bazel.mk's naming scheme for the server container.
+    if command -v realpath >/dev/null 2>&1; then
+      ws="$(realpath -m "$(pwd)" 2>/dev/null)"
+    else
+      ws="$(pwd)"
+    fi
+    if command -v md5sum >/dev/null 2>&1; then
+      hash="$(printf %s "${ws}" | md5sum | cut -c1-8)"
+    else
+      hash=""
+    fi
+    docker_name="gvisor-bazel-${hash}-${arch}"
+
+    if [[ -n "${hash}" ]] && docker inspect "${docker_name}" >/dev/null 2>&1; then
+      echo "--- bazel info (docker exec ${docker_name})" >&2
+      docker exec "${docker_name}" bazel version >&2
+      ob="$(docker exec "${docker_name}" bazel info output_base 2>/dev/null)"
+      if [[ -n "${ob}" ]]; then
+        echo "output_base=${ob}" >&2
+        docker exec "${docker_name}" bash -lc "ls -lah \"${ob}/external/rules_go++go_sdk+main___download_0/bin/go\" || true" >&2
+        docker exec "${docker_name}" bash -lc "ls -lah \"${ob}/external/rules_go++go_sdk+main___download_0/go/bin/go\" || true" >&2
+        docker exec "${docker_name}" bash -lc "file \"${ob}/external/rules_go++go_sdk+main___download_0/bin/go\" || true" >&2
+      fi
+    else
+      echo "docker: no bazel server container found at ${docker_name}" >&2
+    fi
+  fi
+  set -e
+  exit "${rc}"
+fi
 unzip bazel-bin/gopath.zip -d "${go_output}"
 
 # We expect to have an existing go branch that we will use as the basis for this

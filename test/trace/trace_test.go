@@ -700,8 +700,11 @@ func checkSyscallChdir(msg test.Message) error {
 	if p.Fd < 3 && p.Fd != unix.AT_FDCWD { // Constant used for all file-related syscalls.
 		return fmt.Errorf("invalid FD: %d", p.Fd)
 	}
-	if want := "trace_test.abc"; !strings.Contains(p.Pathname, want) {
-		return fmt.Errorf("wrong Pathname, got: %q, want: %q", p.Pathname, want)
+	// fchdir events have an FD but no pathname.
+	if p.Fd == unix.AT_FDCWD {
+		if want := "trace_test.abc"; !strings.Contains(p.Pathname, want) {
+			return fmt.Errorf("wrong Pathname, got: %q, want: %q", p.Pathname, want)
+		}
 	}
 
 	return nil

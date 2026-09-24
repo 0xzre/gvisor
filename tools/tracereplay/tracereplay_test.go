@@ -32,7 +32,17 @@ func TestBasic(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	endpoint := filepath.Join(dir, "tracereplay.sock")
+	// Unix domain socket paths are limited to 108 bytes on Linux. Bazel's
+	// TEST_TMPDIR may be deeply nested, so use a path relative to the current
+	// working directory to keep the socket path short.
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	endpoint, err := filepath.Rel(cwd, filepath.Join(dir, "tracereplay.sock"))
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	// Start a new save server to store the replayed file. This tests that save
 	// communicates with clients correctly and generates a valid file.
